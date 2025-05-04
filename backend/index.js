@@ -1,138 +1,3 @@
-// const http = require('http');
-// const express = require('express');
-// const mngAPI = express();
-
-// const Docker = require("dockerode")
-// const docker = new Docker({socketPath : '/var/run/docker.sock'})
-
-// const db = new Map()
-// const httpProxy = require('http-proxy');
-// const proxy = httpProxy.createProxy({});
-
-// docker.getEvents(function(err,stream){
-//     if(err){
-//         console.log(`Error in getting events`,err);
-//         return;
-//     }
-//     stream.on('data',async(chunck)=>{
-//         try {
-//             if(!chunck) return;
-//             const event  = JSON.parse(chunck.toString());
-
-//             if(event.Type === 'container' && event.Action == 'start'){
-//                 const container = docker.getContainer(event.id);
-//                 const containerInfo = await container.inspect();
-//                 const containerName  = containerInfo.Name.substring(1);
-//                 const ipAddress = containerInfo.NetworkSettings.IPAddress;
-        
-//                 const exposePort = Object.keys(containerInfo.Config.ExposedPorts)
-//                 let defaultPort = null ;
-//                 if(exposePort && exposePort.length > 0){
-//                     const [port,type] = exposePort[0].split('/')
-//                     if(type === 'tcp'){
-//                         defaultPort = port;
-//                     }
-//                 }
-
-//                 console.log(`Registering ${containerName}.localhost --> http://${ipAddress}:${defaultPort}`);
-//                 db.set(containerName,{containerName, ipAddress,defaultPort})
-//             }
-//         } catch (error) {
-//             console.log(error)
-//         }
-//     })
-// } )
-
-
-// const reverseProxyApp = express();
-
-// reverseProxyApp.use(function(req,res){
-//     const hostname = req.hostname;
-//     const subdomain = hostname.split('.')[0];
-
-//     if(!db.has(subdomain)) return res.status(404).end(404);
-
-//     const {ipAddress, defaultPort} = db.get(subdomain);
-    
-//     const target = `http://${ipAddress}:${defaultPort}`
-
-//     console.log(`Forwading ${hostname}-> ${target}`)
-
-//     return proxy.web(req,res , {target, changeOrigin:true, ws:true })
-
-// })
-
-// // reverse rpoxy 
-// const reverseProxy = http.createServer(reverseProxyApp);
-
-
-// reverseProxy.on('upgrade',(req,socket, head)=>{
-//     const hostname = req.headers.host;
-//     const subdomain = hostname.split(".")[0];
-//     if(!db.has(subdomain)) return res.status(404).end(404);
-//     const {ipAddress, defaultPort} = db.get(subdomain);
-//     const target = `http://${ipAddress}:${defaultPort}`
-//     return proxy.ws(req,socket,head,{
-//         target:target,
-//         ws:true
-//     })
-
-// })
-
-// mngAPI.use(express.json())
-
-// mngAPI.post('/containers',async (req,res)=>{
-//     const {image, tag="latest"} = req.body;
-//     // check imahge is exist ont not 
-
-//     let imageExist = false;
-
-//     const images = await docker.listImages();
-
-//     for(const systemImage of images){
-//         for(const systemTag of systemImage.RepoTags){
-//             if(systemTag === `${image}:${tag}`) imageExist = true;
-//             break;
-//         }
-//         if(imageExist) break;
-//     }
-
-//     // if not exist then pull
-//     if(!imageExist){
-//         await docker.pull(`${image}:${tag}`)
-//     }
-
-//     const container = await docker.createContainer({
-//          Image:`${image}:${tag}`,
-//         Tty:false,
-//         HostConfig:{
-//             AutoRemove:true
-//         }
-//     })
-//     await container.start()
-
-//     return res.json({
-//         status :'success', 
-//         container: `${(await container.inspect()).Name}.localhost`
-//     })
-// })
-
-// mngAPI.listen(8080,()=>{
-//     console.log('mngAPI listning on 8080')
-// })
-
-
-// reverseProxy.listen(80 , ()=>{
-//     console.log('reverseProxy listning on 80')
-// })
-
-
-
-
-
-
-
-//   
 
 const express = require('express');
 const http = require('http');
@@ -141,7 +6,11 @@ const httpProxy = require('http-proxy');
 const cors = require('cors');
 const morgan = require('morgan');
 
+
+
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
+
+
 const db = new Map();
 const containerEvents = new Map();
 const logs = [];
@@ -284,11 +153,11 @@ app.get('/api/containers', async (req, res) => {
 app.post('/api/containers', async (req, res) => {
   try {
     const { image, tag = 'latest', name, env = [], ports = [] } = req.body;
-    
+
     // Check if image exists
     let imageExists = false;
     const images = await docker.listImages();
-    imageExists = images.some(img => 
+    imageExists = images.some(img =>
       img.RepoTags && img.RepoTags.includes(`${image}:${tag}`)
     );
 
@@ -305,27 +174,32 @@ app.post('/api/containers', async (req, res) => {
       });
     }
 
+    // Convert ports array to Docker-compatible structures
+    const exposedPorts = ports.reduce((acc, port) => {
+      acc[`${port}/tcp`] = {};
+      return acc;
+    }, {});
+
+    const portBindings = ports.reduce((acc, port) => {
+      acc[`${port}/tcp`] = [{ HostPort: port }];
+      return acc;
+    }, {});
+
     // Create and start container
     const container = await docker.createContainer({
       Image: `${image}:${tag}`,
       name,
       Env: env,
-      // ExposedPorts: ports.reduce((acc, port) => {
-      //   acc[`${port}/tcp`] = {};
-      //   return acc;
-      // }, {}),
+      ExposedPorts: exposedPorts,
       HostConfig: {
         AutoRemove: true,
-        // PortBindings: ports.reduce((acc, port) => {
-        //   acc[`${port}/tcp`] = [{ HostPort: '' }];
-        //   return acc;
-        // }, {})
+        PortBindings: portBindings
       }
     });
 
     await container.start();
     const containerInfo = await container.inspect();
-    
+
     logEvent('info', `Container ${name} created successfully`);
     res.json({
       status: 'success',
@@ -337,6 +211,7 @@ app.post('/api/containers', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 // Delete container
 app.delete('/api/containers/:id', async (req, res) => {
@@ -352,22 +227,124 @@ app.delete('/api/containers/:id', async (req, res) => {
   }
 });
 
-// Get logs
-app.get('/api/logs', (req, res) => {
-  const { level, limit = 100 } = req.query;
-  let filteredLogs = logs;
-  
-  if (level && level !== 'all') {
-    filteredLogs = logs.filter(log => log.level === level);
+// logs of a container
+app.get('/api/containers/:id/logs', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const container = docker.getContainer(id);
+    const stream = await container.logs({
+      stdout: true,
+      stderr: true,
+      follow: false,
+      tail: 100
+    });
+    res.send(stream.toString('utf8'));
+  } catch (error) {
+    logEvent('error', `Error fetching container logs: ${error.message}`);
+    res.status(500).json({ error: error.message });
   }
-  
-  res.json(filteredLogs.slice(0, parseInt(limit)));
 });
+
+// stats of a container
+app.get('/api/containers/:id/stats', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const container = docker.getContainer(id);
+    const stream = await container.stats({ stream: false });
+    res.json(stream);
+  } catch (error) {
+    logEvent('error', `Error fetching stats for container ${id}: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+// List images with size and tag info
+app.get('/api/images', async (req, res) => {
+  try {
+    const images = await docker.listImages({ all: true });
+    res.json(images.map(img => ({
+      id: img.Id,
+      tags: img.RepoTags,
+      size: img.Size,
+      created: img.Created
+    })));
+  } catch (error) {
+    logEvent('error', `Error fetching images: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete an image
+app.delete('/api/images/:id', async (req, res) => {
+  try {
+    await docker.getImage(req.params.id).remove();
+    logEvent('info', `Image ${req.params.id} removed`);
+    res.json({ status: 'success' });
+  } catch (error) {
+    logEvent('error', `Error deleting image: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+app.get('/api/docker-info', async (req, res) => {
+  try {
+    const info = await docker.info();
+    const version = await docker.version();
+    res.json({ info, version });
+  } catch (error) {
+    logEvent('error', `Error fetching Docker info: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+app.get('/api/volumes', async (req, res) => {
+  try {
+    const volumes = await docker.listVolumes();
+    res.json(volumes);
+  } catch (error) {
+    logEvent('error', `Error fetching volumes: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/networks', async (req, res) => {
+  try {
+    const networks = await docker.listNetworks();
+    res.json(networks);
+  } catch (error) {
+    logEvent('error', `Error fetching networks: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+
+app.get('/api/events', (req, res) => {
+  const { type, since } = req.query;
+  let filtered = Array.from(containerEvents.entries());
+
+  if (since) {
+    const sinceTimestamp = parseInt(since, 10);
+    filtered = filtered.filter(([ts]) => ts >= sinceTimestamp);
+  }
+
+  const formatted = filtered.map(([ts, action]) => ({
+    timestamp: new Date(ts).toISOString(),
+    action
+  }));
+
+  res.json(formatted);
+});
+
 
 
 
 // Reverse proxy setup
 const reverseProxyApp = express();
+
 reverseProxyApp.use((req, res) => {
   const hostname = req.hostname;
   const subdomain = hostname.split('.')[0];
@@ -400,8 +377,8 @@ proxyServer.on('upgrade', (req, socket, head) => {
   
   const { ipAddress, defaultPort } = db.get(subdomain);
   const target = `http://${ipAddress}:${defaultPort}`;
-  
   proxy.ws(req, socket, head, { target, ws: true });
+
 });
 
 // Start servers

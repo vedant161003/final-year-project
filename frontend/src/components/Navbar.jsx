@@ -12,7 +12,7 @@ function Navbar() {
     { path: '/', label: 'Dashboard', icon: BarChart2 },
     { path: '/containers', label: 'Containers', icon: Boxes },
     { path: '/logs', label: 'Logs', icon: List },
-    { path: '/settings', label: 'Settings', icon: SettingsIcon },
+    { path: '/overview', label: 'Overview', icon: SettingsIcon },
   ];
 
   return (

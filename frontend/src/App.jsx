@@ -4,6 +4,7 @@ import Navbar from './components/Navbar';
 import Dashboard from './pages/Dashboard';
 import Containers from './pages/Containers';
 import Logs from './pages/Logs';
+import DockerOverview from './pages/DockerOverview';
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/containers" element={<Containers />} />
             <Route path="/logs" element={<Logs />} />
+            <Route path="/overview" element={<DockerOverview />} />
           </Routes>
         </div>
       </div>
